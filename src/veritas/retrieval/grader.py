@@ -2,10 +2,6 @@ from veritas.ingestion.chunking import chunk_document
 from veritas.llm.base import LLMProvider
 from veritas.retrieval.utils import parse_yes_no
 
-...
-
-response = llm.generate(prompt)
-return parse_yes_no(response)
 def grade_relevance(
     query: str,
     chunk_content: str,
