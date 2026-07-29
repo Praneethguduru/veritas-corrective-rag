@@ -6,10 +6,14 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "chromadb>=1.5.9",
+    "grok>=6.2",
+    "groq>=1.6.0",
     "ipykernel>=7.3.0",
     "langchain-text-splitters>=1.1.2",
+    "ollama>=0.6.2",
     "pymupdf>=1.28.0",
     "pymupdf4llm>=1.28.0",
+    "python-dotenv>=1.2.2",
     "sentence-transformers>=5.6.1",
     "tiktoken>=0.13.0",
 ]
