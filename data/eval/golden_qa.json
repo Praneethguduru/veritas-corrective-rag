@@ -1,0 +1,22 @@
+[
+  {
+    "question": "What is multi-head attention?",
+    "ground_truth": "Multi-head attention linearly projects queries, keys, and values multiple times with different learned projections, performs attention in parallel on each, then concatenates and projects the results, allowing the model to attend to information from different representation subspaces."
+  },
+  {
+    "question": "What does BERT stand for?",
+    "ground_truth": "BERT stands for Bidirectional Encoder Representations from Transformers."
+  },
+  {
+    "question": "How many parameters does GPT-3 have?",
+    "ground_truth": "GPT-3's largest model has 175 billion parameters."
+  },
+  {
+    "question": "What is the capital of France?",
+    "ground_truth": "Paris is the capital of France."
+  },
+  {
+    "question": "What is positional encoding used for in the Transformer?",
+    "ground_truth": "Positional encoding injects information about the relative or absolute position of tokens in a sequence, since the Transformer has no recurrence or convolution to capture order."
+  }
+]
