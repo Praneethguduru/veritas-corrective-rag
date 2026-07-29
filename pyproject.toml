@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "chromadb>=1.5.9",
+    "datasets>=5.0.1",
     "ddg>=0.2.2",
     "ddgs>=9.14.4",
     "fastapi>=0.140.13",
