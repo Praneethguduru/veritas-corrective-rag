@@ -1,7 +1,7 @@
 from functools import lru_cache
 from sentence_transformers import SentenceTransformer
 import chromadb
-from chunking import chunk_document
+from veritas.ingestion.chunking import chunk_document
 
 
 @lru_cache(maxsize=1)
