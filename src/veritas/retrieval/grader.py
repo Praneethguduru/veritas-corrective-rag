@@ -36,17 +36,6 @@ def grade_relevance(
 
     response = llm.generate(prompt)
     return parse_yes_no(response)
-    answer = response.strip().lower()
-
-    if answer.startswith("yes"):
-        return True
-
-    if answer.startswith("no"):
-        return False
-
-    # Fallback for slightly verbose models like:
-    # "I think yes, this seems relevant."
-    return "yes" in answer
 
 
 def embed_query(query: str, model) -> list[float]:
