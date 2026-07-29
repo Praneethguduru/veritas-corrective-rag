@@ -4,84 +4,69 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tiktoken
 
 # -----------------------------
-# Configuration
-# -----------------------------
-MAX_CHUNK_TOKENS = 500
-CHUNK_OVERLAP = 50
-MIN_CHUNK_TOKENS = 5
-
-# -----------------------------
 # Tokenizer
 # -----------------------------
 encoding = tiktoken.get_encoding("cl100k_base")
 
 
 def token_length(text: str) -> int:
-    """Return the number of tokens in a string."""
     return len(encoding.encode(text))
 
 
 # -----------------------------
-# Remove OCR picture text
+# Preprocessing: strip OCR'd image/picture text
 # -----------------------------
 def strip_picture_text(markdown_text: str) -> str:
     """
-    Remove OCR'd picture text blocks inserted by pymupdf4llm.
-
-    These blocks usually contain noisy text extracted from figures
-    and aren't useful for RAG retrieval.
+    Removes <!-- Start of picture text --> ... <!-- End of picture text -->
+    blocks. These are OCR'd captions/text pulled from embedded images
+    (e.g. attention visualization figures) and are usually noisy,
+    repetitive, and not useful for retrieval.
     """
     pattern = r"<!-- Start of picture text -->.*?<!-- End of picture text -->"
     return re.sub(pattern, "", markdown_text, flags=re.DOTALL)
 
 
 # -----------------------------
-# Validate headings
+# Heading validity check (Fix 4)
 # -----------------------------
 def looks_like_real_heading(text: str) -> bool:
     """
-    Ignore fake headings such as equations.
-
-    Example rejected:
-        # x = y + z
-
-    Example accepted:
-        # Introduction
-        # 3 Experiments
-        # A. Appendix
+    Returns True only if the text looks like a real section title:
+    - contains at least one real word (3+ consecutive letters)
+    - does NOT contain an '=' sign (a strong signal it's a formula, not a heading)
     """
     if "=" in text:
         return False
-
-    return bool(re.search(r"[A-Za-z]", text))
+    return bool(re.search(r"[A-Za-z]{3,}", text))
 
 
 # -----------------------------
-# Split by markdown headings
+# Stage 1: Split by Markdown headers
 # -----------------------------
 def split_by_headers(markdown_text: str) -> list[dict]:
     """
-    Returns:
-    [
-        {
-            "heading": "...",
-            "content": "..."
-        },
-        ...
-    ]
-    """
+    Splits markdown into sections based on headings.
 
+    Returns:
+        [
+            {
+                "heading": "...",
+                "content": "..."
+            },
+            ...
+        ]
+    """
     pattern = r"^(#{1,6})\s+(.*)$"
 
     sections = []
-
-    current_heading = "front_matter"
-    current_content = []
+    current_heading = "front_matter"  # Fix 1: no longer a fake "Introduction"
+    current_content: list[str] = []
 
     def flush():
+        """Append the current section if it has real (non-empty) content."""
         joined = "\n".join(current_content).strip()
-
-        if joined:
+        if joined:  # Fix 2: check actual text, not just list truthiness
             sections.append(
                 {
                     "heading": current_heading,
@@ -90,39 +75,37 @@ def split_by_headers(markdown_text: str) -> list[dict]:
             )
 
     for line in markdown_text.splitlines():
-
         match = re.match(pattern, line)
 
         if match and looks_like_real_heading(match.group(2)):
+            # Fix 4: only treat as a new heading if it looks like a real title,
+            # not a formula or stray symbol line.
             flush()
-
-            current_content.clear()
             current_heading = match.group(2).strip()
-
+            current_content = []
         else:
             current_content.append(line)
 
-    flush()
+    flush()  # flush whatever is left at end of document
 
     return sections
 
 
 # -----------------------------
-# Split oversized sections
+# Stage 2: Split long sections
 # -----------------------------
 def sub_split_if_needed(
     section: dict,
-    max_tokens: int = MAX_CHUNK_TOKENS,
-    overlap: int = CHUNK_OVERLAP,
+    max_tokens: int = 500,
+    overlap: int = 50,
 ) -> list[dict]:
-
+    """
+    If a section fits within max_tokens, returns it as-is (with chunk_index=0
+    for consistency — Fix 3). Otherwise recursively splits it into overlapping
+    sub-chunks, carrying the parent heading forward on each piece.
+    """
     if token_length(section["content"]) <= max_tokens:
-        return [
-            {
-                **section,
-                "chunk_index": 0,
-            }
-        ]
+        return [{**section, "chunk_index": 0}]
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=max_tokens,
@@ -139,42 +122,40 @@ def sub_split_if_needed(
 
     pieces = splitter.split_text(section["content"])
 
-    return [
-        {
-            "heading": section["heading"],
-            "content": piece,
-            "chunk_index": i,
-        }
-        for i, piece in enumerate(pieces)
-    ]
+    output = []
+    for i, piece in enumerate(pieces):
+        output.append(
+            {
+                "heading": section["heading"],
+                "content": piece,
+                "chunk_index": i,
+            }
+        )
+
+    return output
 
 
 # -----------------------------
-# Main chunking pipeline
+# Stage 3: Orchestrator
 # -----------------------------
 def chunk_document(
     markdown_text: str,
     source_file: str,
-    max_tokens: int = MAX_CHUNK_TOKENS,
-    overlap: int = CHUNK_OVERLAP,
+    max_tokens: int = 500,
+    overlap: int = 50,
 ) -> list[dict]:
     """
-    Complete chunking pipeline.
+    Full pipeline: strip picture-text noise -> split by headers ->
+    sub-split long sections -> attach full metadata.
 
-    Returns:
-    [
-        {
-            "id": 0,
-            "source": "...",
-            "heading": "...",
-            "chunk_index": 0,
-            "content": "...",
-            "token_count": 421,
-        },
-        ...
-    ]
+    Returns a list of chunk dicts, each with:
+        - id: int, unique within this document
+        - source: str, source filename
+        - heading: str, section heading this chunk belongs to
+        - chunk_index: int, position within the section (0 if not split)
+        - content: str, the chunk text
+        - token_count: int
     """
-
     markdown_text = strip_picture_text(markdown_text)
 
     sections = split_by_headers(markdown_text)
@@ -183,70 +164,33 @@ def chunk_document(
     chunk_id = 0
 
     for section in sections:
-
-        split_chunks = sub_split_if_needed(
-            section,
-            max_tokens=max_tokens,
-            overlap=overlap,
-        )
+        split_chunks = sub_split_if_needed(section, max_tokens=max_tokens, overlap=overlap)
 
         for chunk in split_chunks:
+            chunk["id"] = chunk_id
+            chunk["source"] = source_file
+            chunk["token_count"] = token_length(chunk["content"])
 
-            tokens = token_length(chunk["content"])
-
-            # Skip tiny fragments
-            if tokens < MIN_CHUNK_TOKENS:
-                continue
-
-            chunks.append(
-                {
-                    "id": chunk_id,
-                    "source": source_file,
-                    "heading": chunk["heading"],
-                    "chunk_index": chunk["chunk_index"],
-                    "content": chunk["content"],
-                    "token_count": tokens,
-                }
-            )
-
+            chunks.append(chunk)
             chunk_id += 1
 
     return chunks
 
 
 # -----------------------------
-# Test
+# Manual test run
 # -----------------------------
 if __name__ == "__main__":
-
     import pymupdf4llm
 
-    pdfs = [
+    for filename in [
         "attention_is_all_you_need.pdf",
         "BERT.pdf",
         "Language_model_for_few_shot_learners.pdf",
-    ]
-
-    for pdf in pdfs:
-
-        markdown = pymupdf4llm.to_markdown(f"data/raw/{pdf}")
-
-        chunks = chunk_document(markdown, pdf)
-
-        print(f"\n{'=' * 90}")
-        print(f"{pdf}")
-        print(f"Total chunks: {len(chunks)}")
-        print(f"{'=' * 90}")
-
+    ]:
+        markdown = pymupdf4llm.to_markdown(f"data/raw/{filename}")
+        chunks = chunk_document(markdown, filename)
+        print(f"\n\n########## {filename}: {len(chunks)} chunks ##########\n")
         for chunk in chunks:
-
-            preview = chunk["content"][:100].replace("\n", " ")
-
-            print(
-                f"[{chunk['id']:03}] "
-                f"{chunk['heading']} "
-                f"(chunk {chunk['chunk_index']}, "
-                f"{chunk['token_count']} tokens)"
-            )
-            print(f"Preview: {preview}...")
-            print("-" * 90)
+            preview = chunk["content"][:80].replace("\n", " ")
+            print(f"[{chunk['id']}] {chunk['heading']} (idx {chunk['chunk_index']}, {chunk['token_count']} tok): {preview}...")
