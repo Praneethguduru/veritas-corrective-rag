@@ -1,8 +1,11 @@
+from functools import lru_cache
+
 from veritas.llm.base import LLMProvider
-from veritas.llm.ollama_provider import OllamaProvider
 from veritas.llm.groq_provider import GroqProvider
+from veritas.llm.ollama_provider import OllamaProvider
 
 
+@lru_cache(maxsize=None)
 def get_llm_provider(backend: str) -> LLMProvider:
     backend = backend.lower()
 
